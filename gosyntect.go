@@ -2,11 +2,14 @@ package gosyntect
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/opentracing-contrib/go-stdlib/nethttp"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 )
 
@@ -46,23 +49,42 @@ type response struct {
 
 // Client represents a client connection to a syntect_server.
 type Client struct {
-	// Client can be overridden to be something other than http.DefaultClient.
-	Client *http.Client
-
 	syntectServer string
 }
 
 // Highlight performs a query to highlight some code.
-func (c *Client) Highlight(q *Query) (*Response, error) {
+func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
+	// Build the request.
 	jsonQuery, err := json.Marshal(q)
 	if err != nil {
 		return nil, errors.Wrap(err, "encoding query")
 	}
-	resp, err := c.Client.Post(c.url("/"), "application/json", bytes.NewReader(jsonQuery))
+	req, err := http.NewRequest("POST", c.url("/"), bytes.NewReader(jsonQuery))
+	if err != nil {
+		return nil, errors.Wrap(err, "building request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add tracing to the request.
+	req = req.WithContext(ctx)
+	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req,
+		nethttp.OperationName("Highlight"),
+		nethttp.ClientTrace(false))
+	defer ht.Finish()
+	client := &http.Client{Transport: &nethttp.Transport{}}
+
+	// Perform the request.
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("making request to %s", c.url("/")))
 	}
 	defer resp.Body.Close()
+
+	// Can only call ht.Span() after the request has been exected, so add our span tags in now.
+	ht.Span().SetTag("Extension", q.Extension)
+	ht.Span().SetTag("Theme", q.Theme)
+
+	// Decode the response.
 	var r response
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
@@ -82,7 +104,6 @@ func (c *Client) url(path string) string {
 // New returns a client connection to a syntect_server.
 func New(syntectServer string) *Client {
 	return &Client{
-		Client:        http.DefaultClient,
 		syntectServer: strings.TrimSuffix(syntectServer, "/"),
 	}
 }

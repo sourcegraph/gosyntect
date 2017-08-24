@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -43,7 +44,7 @@ func main() {
 	}
 
 	cl := gosyntect.New(server)
-	resp, err := cl.Highlight(&gosyntect.Query{
+	resp, err := cl.Highlight(context.Background(), &gosyntect.Query{
 		Extension: strings.TrimPrefix(filepath.Ext(file), "."),
 		Theme:     theme,
 		Code:      string(data),
