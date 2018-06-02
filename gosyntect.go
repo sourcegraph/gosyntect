@@ -43,16 +43,17 @@ type Response struct {
 	Plaintext bool
 }
 
-// Error is an error returned from the syntect_server.
-type Error string
-
-func (e Error) Error() string {
-	return string(e)
-}
+var (
+	// ErrInvalidTheme is returned when the Query.Theme is not a valid theme.
+	ErrInvalidTheme = errors.New("invalid theme")
+)
 
 type response struct {
-	Data  string `json:"data"`
+	Data string `json:"data"`
+
+	// Error response fields.
 	Error string `json:"error"`
+	Code  string `json:"code"`
 }
 
 // Client represents a client connection to a syntect_server.
@@ -98,7 +99,18 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
 	}
 	if r.Error != "" {
-		return nil, errors.Wrap(Error(r.Error), c.syntectServer)
+		var err error
+		switch r.Code {
+		case "invalid_theme":
+			err = ErrInvalidTheme
+		case "resource_not_found":
+			// resource_not_found is returned in the event of a 404, indicating a bug
+			// in gosyntect.
+			err = errors.New("gosyntect internal error: resource_not_found")
+		default:
+			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
+		}
+		return nil, errors.Wrap(err, c.syntectServer)
 	}
 	return &Response{
 		Data: r.Data,
