@@ -15,10 +15,14 @@ import (
 
 // Query represents a code highlighting query to the syntect_server.
 type Query struct {
-	// Extension is the file extension of the code.
-	//
-	// See https://github.com/sourcegraph/syntect_server#supported-file-extensions
+	// Extension is deprecated: use Filepath instead.
 	Extension string `json:"extension"`
+
+	// Filepath is the file path of the code. It can be the full file path, or
+	// just the name and extension.
+	//
+	// See: https://github.com/sourcegraph/syntect_server#supported-file-extensions
+	Filepath string `json:"filepath"`
 
 	// Theme is the color theme to use for highlighting.
 	//
@@ -81,7 +85,7 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	defer resp.Body.Close()
 
 	// Can only call ht.Span() after the request has been exected, so add our span tags in now.
-	ht.Span().SetTag("Extension", q.Extension)
+	ht.Span().SetTag("Filepath", q.Filepath)
 	ht.Span().SetTag("Theme", q.Theme)
 
 	// Decode the response.

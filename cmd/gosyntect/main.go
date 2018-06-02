@@ -45,9 +45,9 @@ func main() {
 
 	cl := gosyntect.New(server)
 	resp, err := cl.Highlight(context.Background(), &gosyntect.Query{
-		Extension: strings.TrimPrefix(filepath.Ext(file), "."),
-		Theme:     theme,
-		Code:      string(data),
+		Filepath: filepath.Base(file),
+		Theme:    theme,
+		Code:     string(data),
 	})
 	if err != nil {
 		log.Fatal(err)
