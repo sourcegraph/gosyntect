@@ -37,6 +37,10 @@ type Query struct {
 type Response struct {
 	// Data is the actual highlighted HTML version of Query.Code.
 	Data string
+
+	// Plaintext indicates whether or not a syntax could not be found for the
+	// file and instead it was rendered as plain text.
+	Plaintext bool
 }
 
 // Error is an error returned from the syntect_server.
