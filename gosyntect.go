@@ -49,7 +49,9 @@ var (
 )
 
 type response struct {
-	Data string `json:"data"`
+	// Successful response fields.
+	Data      string `json:"data"`
+	Plaintext bool   `json:"plaintext"`
 
 	// Error response fields.
 	Error string `json:"error"`
@@ -113,7 +115,8 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		return nil, errors.Wrap(err, c.syntectServer)
 	}
 	return &Response{
-		Data: r.Data,
+		Data:      r.Data,
+		Plaintext: r.Plaintext,
 	}, nil
 }
 
