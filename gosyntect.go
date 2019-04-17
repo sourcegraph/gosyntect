@@ -46,6 +46,8 @@ type Response struct {
 var (
 	// ErrInvalidTheme is returned when the Query.Theme is not a valid theme.
 	ErrInvalidTheme = errors.New("invalid theme")
+	// ErrInvalidRequest is returned when the request is too large for syntect_server to handle (e.g. file is too large to highlight).
+	ErrRequestTooLarge = errors.New("request too large")
 )
 
 type response struct {
@@ -90,6 +92,10 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		return nil, errors.Wrap(err, fmt.Sprintf("making request to %s", c.url("/")))
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusBadRequest {
+		return nil, ErrInvalidRequest
+	}
 
 	// Can only call ht.Span() after the request has been exected, so add our span tags in now.
 	ht.Span().SetTag("Filepath", q.Filepath)
