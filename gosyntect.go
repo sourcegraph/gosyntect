@@ -46,7 +46,7 @@ type Response struct {
 var (
 	// ErrInvalidTheme is returned when the Query.Theme is not a valid theme.
 	ErrInvalidTheme = errors.New("invalid theme")
-	// ErrInvalidRequest is returned when we get a 400 from syntect_server.
+	// ErrInvalidRequest is returned when the request is too large for syntect_server to handle (e.g. file is too large to highlight).
 	ErrRequestTooLarge = errors.New("request too large")
 )
 
