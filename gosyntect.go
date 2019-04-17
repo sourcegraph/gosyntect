@@ -94,7 +94,7 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusBadRequest {
-		return nil, ErrInvalidRequest
+		return nil, ErrRequestTooLarge
 	}
 
 	// Can only call ht.Span() after the request has been exected, so add our span tags in now.
