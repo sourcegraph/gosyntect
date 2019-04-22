@@ -46,8 +46,14 @@ type Response struct {
 var (
 	// ErrInvalidTheme is returned when the Query.Theme is not a valid theme.
 	ErrInvalidTheme = errors.New("invalid theme")
+
 	// ErrRequestTooLarge is returned when the request is too large for syntect_server to handle (e.g. file is too large to highlight).
 	ErrRequestTooLarge = errors.New("request too large")
+
+	// ErrPanic occurs when syntect_server panics while highlighting code. This
+	// most often occurs when Syntect does not support e.g. an obscure or
+	// relatively unused sublime-syntax feature and as a result panics.
+	ErrPanic = errors.New("syntect panic while highlighting")
 )
 
 type response struct {
@@ -115,6 +121,8 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 			// resource_not_found is returned in the event of a 404, indicating a bug
 			// in gosyntect.
 			err = errors.New("gosyntect internal error: resource_not_found")
+		case "panic":
+			err = ErrPanic
 		default:
 			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
 		}
