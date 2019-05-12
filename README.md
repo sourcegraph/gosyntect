@@ -14,13 +14,13 @@ go get -u github.com/sourcegraph/gosyntect/cmd/gosyntect
 usage: gosyntect <server> <theme> <file.go>
 
 example:
-	gosyntect http://localhost:8000 'InspiredGitHub' gosyntect.go
+	gosyntect http://localhost:9238 'InspiredGitHub' gosyntect.go
 ```
 
 ## API
 
 ```Go
-client := gosyntect.New("http://localhost:8000")
+client := gosyntect.New("http://localhost:9238")
 resp, err := cl.Highlight(&gosyntect.Query{
 	Extension: "go",
 	Theme:     "InspiredGitHub",

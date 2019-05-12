@@ -19,7 +19,7 @@ func main() {
 		fmt.Println("usage: gosyntect <server> <theme> <file.go>")
 		fmt.Println("")
 		fmt.Println("example:")
-		fmt.Println("	gosyntect http://localhost:8000 'InspiredGitHub' gosyntect.go")
+		fmt.Println("	gosyntect http://localhost:9238 'InspiredGitHub' gosyntect.go")
 		fmt.Println("")
 		os.Exit(2)
 	}
