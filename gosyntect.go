@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	opentracing "github.com/opentracing/opentracing-go"
@@ -31,6 +32,14 @@ type Query struct {
 
 	// Code is the literal code to highlight.
 	Code string `json:"code"`
+
+	// StabilizeTimeout, if non-zero, overrides the default syntect_server
+	// http-server-stabilizer timeout of 10s. This is most useful when a user
+	// is requesting to highlight a very large file and is willing to wait
+	// longer, but it is important this not _always_ be a long duration because
+	// the worker's threads could get stuck at 100% CPU for this amount of
+	// time if the user's request ends up being a problematic one.
+	StabilizeTimeout time.Duration `json:"-"`
 }
 
 // Response represents a response to a code highlighting query.
@@ -54,6 +63,13 @@ var (
 	// most often occurs when Syntect does not support e.g. an obscure or
 	// relatively unused sublime-syntax feature and as a result panics.
 	ErrPanic = errors.New("syntect panic while highlighting")
+
+	// ErrHSSWorkerTimeout occurs when syntect_server's wrapper,
+	// http-server-stabilizer notices syntect_server is taking too long to
+	// serve a request, has most likely gotten stuck, and as such has been
+	// restarted. This occurs rarely on certain files syntect_server cannot yet
+	// handle for some reason.
+	ErrHSSWorkerTimeout = errors.New("HSS worker timeout while serving request")
 )
 
 type response struct {
@@ -83,6 +99,9 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		return nil, errors.Wrap(err, "building request")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if q.StabilizeTimeout != 0 {
+		req.Header.Set("X-Stabilize-Timeout", q.StabilizeTimeout.String())
+	}
 
 	// Add tracing to the request.
 	req = req.WithContext(ctx)
@@ -103,7 +122,7 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		return nil, ErrRequestTooLarge
 	}
 
-	// Can only call ht.Span() after the request has been exected, so add our span tags in now.
+	// Can only call ht.Span() after the request has been executed, so add our span tags in now.
 	ht.Span().SetTag("Filepath", q.Filepath)
 	ht.Span().SetTag("Theme", q.Theme)
 
@@ -123,6 +142,8 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 			err = errors.New("gosyntect internal error: resource_not_found")
 		case "panic":
 			err = ErrPanic
+		case "hss_worker_timeout":
+			err = ErrHSSWorkerTimeout
 		default:
 			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
 		}
