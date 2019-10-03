@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sourcegraph/gosyntect"
 )
@@ -43,11 +44,20 @@ func main() {
 		log.Fatal(err)
 	}
 
+	var stabilizeTimeout time.Duration
+	if v := os.Getenv("STABILIZE_TIMEOUT"); v != "" {
+		stabilizeTimeout, err = time.ParseDuration(v)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	cl := gosyntect.New(server)
 	resp, err := cl.Highlight(context.Background(), &gosyntect.Query{
-		Filepath: filepath.Base(file),
-		Theme:    theme,
-		Code:     string(data),
+		Filepath:         filepath.Base(file),
+		Theme:            theme,
+		Code:             string(data),
+		StabilizeTimeout: stabilizeTimeout,
 	})
 	if err != nil {
 		log.Fatal(err)
