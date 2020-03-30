@@ -89,6 +89,14 @@ type Client struct {
 
 // Highlight performs a query to highlight some code.
 func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
+	return c.HighlightWithTracing(ctx, q, nil)
+}
+
+func (c *Client) HighlightWithTracing(ctx context.Context, q *Query, tracer opentracing.Tracer) (*Response, error) {
+	if tracer == nil {
+		tracer = opentracing.NoopTracer{}
+	}
+
 	// Build the request.
 	jsonQuery, err := json.Marshal(q)
 	if err != nil {
@@ -105,7 +113,7 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 
 	// Add tracing to the request.
 	req = req.WithContext(ctx)
-	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req,
+	req, ht := nethttp.TraceRequest(tracer, req,
 		nethttp.OperationName("Highlight"),
 		nethttp.ClientTrace(false))
 	defer ht.Finish()
