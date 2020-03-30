@@ -40,6 +40,9 @@ type Query struct {
 	// the worker's threads could get stuck at 100% CPU for this amount of
 	// time if the user's request ends up being a problematic one.
 	StabilizeTimeout time.Duration `json:"-"`
+
+	// Tracer, if not nil, will be used to record opentracing spans associated with the query.
+	Tracer opentracing.Tracer
 }
 
 // Response represents a response to a code highlighting query.
@@ -89,14 +92,6 @@ type Client struct {
 
 // Highlight performs a query to highlight some code.
 func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
-	return c.HighlightWithTracing(ctx, q, nil)
-}
-
-func (c *Client) HighlightWithTracing(ctx context.Context, q *Query, tracer opentracing.Tracer) (*Response, error) {
-	if tracer == nil {
-		tracer = opentracing.NoopTracer{}
-	}
-
 	// Build the request.
 	jsonQuery, err := json.Marshal(q)
 	if err != nil {
@@ -112,6 +107,10 @@ func (c *Client) HighlightWithTracing(ctx context.Context, q *Query, tracer open
 	}
 
 	// Add tracing to the request.
+	tracer := q.Tracer
+	if tracer == nil {
+		tracer = opentracing.NoopTracer{}
+	}
 	req = req.WithContext(ctx)
 	req, ht := nethttp.TraceRequest(tracer, req,
 		nethttp.OperationName("Highlight"),
