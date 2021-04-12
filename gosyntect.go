@@ -45,6 +45,34 @@ type Query struct {
 	Tracer opentracing.Tracer
 }
 
+// CSSTableQuery represents a code highlighting query to the syntect_server.
+type CSSTableQuery struct {
+	// Filepath is the file path of the code. It can be the full file path, or
+	// just the name and extension.
+	//
+	// See: https://github.com/sourcegraph/syntect_server#supported-file-extensions
+	Filepath string `json:"filepath"`
+
+	// Code is the literal code to highlight.
+	Code string `json:"code"`
+
+	// MaxLineLength is the maximum length of line that will be highlighted
+	// by syntect. If a line is longer, it will just be returned unhighlighted.
+	// If nil, there is no max length to highlight.
+	MaxLineLength *int `json:"max_line_length,omitempty"`
+
+	// StabilizeTimeout, if non-zero, overrides the default syntect_server
+	// http-server-stabilizer timeout of 10s. This is most useful when a user
+	// is requesting to highlight a very large file and is willing to wait
+	// longer, but it is important this not _always_ be a long duration because
+	// the worker's threads could get stuck at 100% CPU for this amount of
+	// time if the user's request ends up being a problematic one.
+	StabilizeTimeout time.Duration `json:"-"`
+
+	// Tracer, if not nil, will be used to record opentracing spans associated with the query.
+	Tracer opentracing.Tracer
+}
+
 // Response represents a response to a code highlighting query.
 type Response struct {
 	// Data is the actual highlighted HTML version of Query.Code.
@@ -88,6 +116,78 @@ type response struct {
 // Client represents a client connection to a syntect_server.
 type Client struct {
 	syntectServer string
+}
+
+// sharedClient is a shared client aross all HighlightCSSTable requests
+// so connections to the server can be reused.
+var sharedClient = &http.Client{Transport: &nethttp.Transport{}}
+
+// HighlightCSSTable performs a query to highlight code and return it in a line-numbered,
+// formatted table with CSS classes for spans
+func (c *Client) HighlightCSSTable(ctx context.Context, q *CSSTableQuery) (*Response, error) {
+	// Build the request.
+	jsonQuery, err := json.Marshal(q)
+	if err != nil {
+		return nil, errors.Wrap(err, "encoding query")
+	}
+	req, err := http.NewRequest("POST", c.url("/css_table"), bytes.NewReader(jsonQuery))
+	if err != nil {
+		return nil, errors.Wrap(err, "building request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if q.StabilizeTimeout != 0 {
+		req.Header.Set("X-Stabilize-Timeout", q.StabilizeTimeout.String())
+	}
+
+	// Add tracing to the request.
+	tracer := q.Tracer
+	if tracer == nil {
+		tracer = opentracing.NoopTracer{}
+	}
+	req = req.WithContext(ctx)
+	req, ht := nethttp.TraceRequest(tracer, req,
+		nethttp.OperationName("HighlightCSSTable"),
+		nethttp.ClientTrace(false))
+	defer ht.Finish()
+
+	// Perform the request.
+	resp, err := sharedClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintf("making request to %s", c.url("/")))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusBadRequest {
+		return nil, ErrRequestTooLarge
+	}
+
+	// Can only call ht.Span() after the request has been executed, so add our span tags in now.
+	ht.Span().SetTag("Filepath", q.Filepath)
+
+	// Decode the response.
+	var r response
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
+	}
+	if r.Error != "" {
+		var err error
+		switch r.Code {
+		case "resource_not_found":
+			// resource_not_found is returned in the event of a 404, indicating a bug
+			// in gosyntect.
+			err = errors.New("gosyntect internal error: resource_not_found")
+		case "panic":
+			err = ErrPanic
+		case "hss_worker_timeout":
+			err = ErrHSSWorkerTimeout
+		default:
+			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
+		}
+		return nil, errors.Wrap(err, c.syntectServer)
+	}
+	return &Response{
+		Data: r.Data,
+	}, nil
 }
 
 // Highlight performs a query to highlight some code.
