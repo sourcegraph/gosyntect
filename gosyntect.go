@@ -169,22 +169,10 @@ func (c *Client) HighlightCSSTable(ctx context.Context, q *CSSTableQuery) (*Resp
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
 	}
-	if r.Error != "" {
-		var err error
-		switch r.Code {
-		case "resource_not_found":
-			// resource_not_found is returned in the event of a 404, indicating a bug
-			// in gosyntect.
-			err = errors.New("gosyntect internal error: resource_not_found")
-		case "panic":
-			err = ErrPanic
-		case "hss_worker_timeout":
-			err = ErrHSSWorkerTimeout
-		default:
-			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
-		}
-		return nil, errors.Wrap(err, c.syntectServer)
+	if err := c.getError(r); err != nil {
+		return nil, err
 	}
+
 	return &Response{
 		Data: r.Data,
 	}, nil
@@ -238,24 +226,10 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
 	}
-	if r.Error != "" {
-		var err error
-		switch r.Code {
-		case "invalid_theme":
-			err = ErrInvalidTheme
-		case "resource_not_found":
-			// resource_not_found is returned in the event of a 404, indicating a bug
-			// in gosyntect.
-			err = errors.New("gosyntect internal error: resource_not_found")
-		case "panic":
-			err = ErrPanic
-		case "hss_worker_timeout":
-			err = ErrHSSWorkerTimeout
-		default:
-			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
-		}
-		return nil, errors.Wrap(err, c.syntectServer)
+	if err := c.getError(r); err != nil {
+		return nil, err
 	}
+
 	return &Response{
 		Data:      r.Data,
 		Plaintext: r.Plaintext,
@@ -264,6 +238,31 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 
 func (c *Client) url(path string) string {
 	return c.syntectServer + path
+}
+
+// getError returns a go error if the response is an error response
+func (c *Client) getError(r response) error {
+	if r.Error == "" {
+		return nil
+	}
+
+	var err error
+	switch r.Code {
+	case "invalid_theme":
+		err = ErrInvalidTheme
+	case "resource_not_found":
+		// resource_not_found is returned in the event of a 404, indicating a bug
+		// in gosyntect.
+		err = errors.New("gosyntect internal error: resource_not_found")
+	case "panic":
+		err = ErrPanic
+	case "hss_worker_timeout":
+		err = ErrHSSWorkerTimeout
+	default:
+		err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
+	}
+
+	return errors.Wrap(err, c.syntectServer)
 }
 
 // New returns a client connection to a syntect_server.
