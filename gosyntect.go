@@ -118,7 +118,7 @@ type Client struct {
 	syntectServer string
 }
 
-// sharedClient is a shared client aross all HighlightCSSTable requests
+// sharedClient is a shared client across all HighlightCSSTable requests
 // so connections to the server can be reused.
 var sharedClient = &http.Client{Transport: &nethttp.Transport{}}
 
