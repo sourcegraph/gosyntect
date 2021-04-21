@@ -26,6 +26,7 @@ type Query struct {
 	Filepath string `json:"filepath"`
 
 	// Theme is the color theme to use for highlighting.
+	// If CSS is true, theme is ignored.
 	//
 	// See https://github.com/sourcegraph/syntect_server#embedded-themes
 	Theme string `json:"theme"`
@@ -39,6 +40,7 @@ type Query struct {
 
 	// LineLengthLimit is the maximum length of line that will be highlighted if set.
 	// Defaults to no max if zero.
+	// If CSS is false, LineLengthLimit is ignored.
 	LineLengthLimit int `json:"line_length_limit,omitempty"`
 
 	// StabilizeTimeout, if non-zero, overrides the default syntect_server
