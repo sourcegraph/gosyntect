@@ -33,33 +33,13 @@ type Query struct {
 	// Code is the literal code to highlight.
 	Code string `json:"code"`
 
-	// StabilizeTimeout, if non-zero, overrides the default syntect_server
-	// http-server-stabilizer timeout of 10s. This is most useful when a user
-	// is requesting to highlight a very large file and is willing to wait
-	// longer, but it is important this not _always_ be a long duration because
-	// the worker's threads could get stuck at 100% CPU for this amount of
-	// time if the user's request ends up being a problematic one.
-	StabilizeTimeout time.Duration `json:"-"`
+	// CSS causes results to be returned in HTML table format with CSS class
+	// names annotating the spans rather than inline styles.
+	CSS bool `json:"css"`
 
-	// Tracer, if not nil, will be used to record opentracing spans associated with the query.
-	Tracer opentracing.Tracer
-}
-
-// CSSTableQuery represents a code highlighting query to the syntect_server.
-type CSSTableQuery struct {
-	// Filepath is the file path of the code. It can be the full file path, or
-	// just the name and extension.
-	//
-	// See: https://github.com/sourcegraph/syntect_server#supported-file-extensions
-	Filepath string `json:"filepath"`
-
-	// Code is the literal code to highlight.
-	Code string `json:"code"`
-
-	// MaxLineLength is the maximum length of line that will be highlighted
-	// by syntect. If a line is longer, it will just be returned unhighlighted.
-	// If nil, there is no max length to highlight.
-	MaxLineLength *int `json:"max_line_length,omitempty"`
+	// LineLengthLimit is the maximum length of line that will be highlighted if set.
+	// Defaults to no max if zero.
+	LineLengthLimit int `json:"line_length_limit,omitempty"`
 
 	// StabilizeTimeout, if non-zero, overrides the default syntect_server
 	// http-server-stabilizer timeout of 10s. This is most useful when a user
@@ -118,65 +98,7 @@ type Client struct {
 	syntectServer string
 }
 
-// sharedClient is a shared client across all HighlightCSSTable requests
-// so connections to the server can be reused.
-var sharedClient = &http.Client{Transport: &nethttp.Transport{}}
-
-// HighlightCSSTable performs a query to highlight code and return it in a line-numbered,
-// formatted table with CSS classes for spans
-func (c *Client) HighlightCSSTable(ctx context.Context, q *CSSTableQuery) (*Response, error) {
-	// Build the request.
-	jsonQuery, err := json.Marshal(q)
-	if err != nil {
-		return nil, errors.Wrap(err, "encoding query")
-	}
-	req, err := http.NewRequest("POST", c.url("/css_table"), bytes.NewReader(jsonQuery))
-	if err != nil {
-		return nil, errors.Wrap(err, "building request")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if q.StabilizeTimeout != 0 {
-		req.Header.Set("X-Stabilize-Timeout", q.StabilizeTimeout.String())
-	}
-
-	// Add tracing to the request.
-	tracer := q.Tracer
-	if tracer == nil {
-		tracer = opentracing.NoopTracer{}
-	}
-	req = req.WithContext(ctx)
-	req, ht := nethttp.TraceRequest(tracer, req,
-		nethttp.OperationName("HighlightCSSTable"),
-		nethttp.ClientTrace(false))
-	defer ht.Finish()
-
-	// Perform the request.
-	resp, err := sharedClient.Do(req)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintf("making request to %s", c.url("/")))
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusBadRequest {
-		return nil, ErrRequestTooLarge
-	}
-
-	// Can only call ht.Span() after the request has been executed, so add our span tags in now.
-	ht.Span().SetTag("Filepath", q.Filepath)
-
-	// Decode the response.
-	var r response
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
-	}
-	if err := c.getError(r); err != nil {
-		return nil, err
-	}
-
-	return &Response{
-		Data: r.Data,
-	}, nil
-}
+var client = &http.Client{Transport: &nethttp.Transport{}}
 
 // Highlight performs a query to highlight some code.
 func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
@@ -204,7 +126,6 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		nethttp.OperationName("Highlight"),
 		nethttp.ClientTrace(false))
 	defer ht.Finish()
-	client := &http.Client{Transport: &nethttp.Transport{}}
 
 	// Perform the request.
 	resp, err := client.Do(req)
@@ -220,16 +141,31 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	// Can only call ht.Span() after the request has been executed, so add our span tags in now.
 	ht.Span().SetTag("Filepath", q.Filepath)
 	ht.Span().SetTag("Theme", q.Theme)
+	ht.Span().SetTag("CSS", q.CSS)
 
 	// Decode the response.
 	var r response
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("decoding JSON response from %s", c.url("/")))
 	}
-	if err := c.getError(r); err != nil {
-		return nil, err
+	if r.Error != "" {
+		var err error
+		switch r.Code {
+		case "invalid_theme":
+			err = ErrInvalidTheme
+		case "resource_not_found":
+			// resource_not_found is returned in the event of a 404, indicating a bug
+			// in gosyntect.
+			err = errors.New("gosyntect internal error: resource_not_found")
+		case "panic":
+			err = ErrPanic
+		case "hss_worker_timeout":
+			err = ErrHSSWorkerTimeout
+		default:
+			err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
+		}
+		return nil, errors.Wrap(err, c.syntectServer)
 	}
-
 	return &Response{
 		Data:      r.Data,
 		Plaintext: r.Plaintext,
@@ -238,31 +174,6 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 
 func (c *Client) url(path string) string {
 	return c.syntectServer + path
-}
-
-// getError returns a go error if the response is an error response
-func (c *Client) getError(r response) error {
-	if r.Error == "" {
-		return nil
-	}
-
-	var err error
-	switch r.Code {
-	case "invalid_theme":
-		err = ErrInvalidTheme
-	case "resource_not_found":
-		// resource_not_found is returned in the event of a 404, indicating a bug
-		// in gosyntect.
-		err = errors.New("gosyntect internal error: resource_not_found")
-	case "panic":
-		err = ErrPanic
-	case "hss_worker_timeout":
-		err = ErrHSSWorkerTimeout
-	default:
-		err = fmt.Errorf("unknown error=%q code=%q", r.Error, r.Code)
-	}
-
-	return errors.Wrap(err, c.syntectServer)
 }
 
 // New returns a client connection to a syntect_server.
