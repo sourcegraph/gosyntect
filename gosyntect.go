@@ -26,12 +26,22 @@ type Query struct {
 	Filepath string `json:"filepath"`
 
 	// Theme is the color theme to use for highlighting.
+	// If CSS is true, theme is ignored.
 	//
 	// See https://github.com/sourcegraph/syntect_server#embedded-themes
 	Theme string `json:"theme"`
 
 	// Code is the literal code to highlight.
 	Code string `json:"code"`
+
+	// CSS causes results to be returned in HTML table format with CSS class
+	// names annotating the spans rather than inline styles.
+	CSS bool `json:"css"`
+
+	// LineLengthLimit is the maximum length of line that will be highlighted if set.
+	// Defaults to no max if zero.
+	// If CSS is false, LineLengthLimit is ignored.
+	LineLengthLimit int `json:"line_length_limit,omitempty"`
 
 	// StabilizeTimeout, if non-zero, overrides the default syntect_server
 	// http-server-stabilizer timeout of 10s. This is most useful when a user
@@ -90,6 +100,8 @@ type Client struct {
 	syntectServer string
 }
 
+var client = &http.Client{Transport: &nethttp.Transport{}}
+
 // Highlight performs a query to highlight some code.
 func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	// Build the request.
@@ -116,7 +128,6 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 		nethttp.OperationName("Highlight"),
 		nethttp.ClientTrace(false))
 	defer ht.Finish()
-	client := &http.Client{Transport: &nethttp.Transport{}}
 
 	// Perform the request.
 	resp, err := client.Do(req)
@@ -132,6 +143,7 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	// Can only call ht.Span() after the request has been executed, so add our span tags in now.
 	ht.Span().SetTag("Filepath", q.Filepath)
 	ht.Span().SetTag("Theme", q.Theme)
+	ht.Span().SetTag("CSS", q.CSS)
 
 	// Decode the response.
 	var r response
