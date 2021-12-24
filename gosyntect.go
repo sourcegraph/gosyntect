@@ -63,6 +63,9 @@ type Response struct {
 	// Plaintext indicates whether or not a syntax could not be found for the
 	// file and instead it was rendered as plain text.
 	Plaintext bool
+
+	// Reports the time syntect took purely for highlighting
+	TimeNanos int64
 }
 
 var (
@@ -89,6 +92,7 @@ type response struct {
 	// Successful response fields.
 	Data      string `json:"data"`
 	Plaintext bool   `json:"plaintext"`
+	TimeNanos int64  `json:"time_ns"`
 
 	// Error response fields.
 	Error string `json:"error"`
@@ -171,6 +175,7 @@ func (c *Client) Highlight(ctx context.Context, q *Query) (*Response, error) {
 	return &Response{
 		Data:      r.Data,
 		Plaintext: r.Plaintext,
+		TimeNanos: r.TimeNanos,
 	}, nil
 }
 
