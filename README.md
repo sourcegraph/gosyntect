@@ -1,5 +1,9 @@
 # gosyntect
 
+gosyntect is now part of the [Sourcegraph monorepo](https://sourcegraph.com/search?q=context:global+repo:%5Egithub%5C.com/sourcegraph/sourcegraph%24+file:gosyntect&patternType=keyword&sm=0).
+
+The information below is preserved for archival purposes only.
+
 gosyntect is a Go HTTP client for [syntect_server](https://github.com/sourcegraph/syntect_server), a Rust HTTP server which syntax highlights code.
 
 ## Installation
